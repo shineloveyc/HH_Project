@@ -1,0 +1,139 @@
+---
+title: "Project 1"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+```{r}
+#load the package
+library(qdap)
+library(tidyr)
+library(dplyr)
+library(tm)
+library(NLP)
+library(textmineR)
+library(RWeka)
+library(wordcloud)
+library(e1071)
+library(caret)
+```
+
+## R Markdown
+
+```{r, echo=FALSE}
+raw_data <- read.csv("CX Wave 1 Merge file 2.22.18.csv",stringsAsFactors = FALSE)
+head(raw_data, 5)
+
+target_data <- raw_data[,c(420,421)]
+text_data <- raw_data[,c(198:210,235:238,246,254,262,362:363)]
+
+new_data <- cbind(target_data,text_data)
+new_data$all_text <- apply(raw_data[,c(198:210,235:238,246,254,262,362:363)], 1, paste, collapse = "")
+
+#just keep all open-ends and target variables
+new_data <- new_data[,-c(3:24)]
+
+new_data[is.na(new_data)] <- "NullValueEntered"
+str(new_data)
+
+#make a source vector
+text <- VectorSource(new_data$all_text)
+
+text_corpus <- VCorpus(text)
+
+clean_corpus <- function(corpus){
+  corpus <- tm_map(corpus, content_transformer(replace_abbreviation))
+  corpus <- tm_map(corpus, removePunctuation)
+  corpus <- tm_map(corpus, removeNumbers)
+  corpus <- tm_map(corpus, stripWhitespace)
+  corpus <- tm_map(corpus, removeWords, c(stopwords("en"), "the", "and","i", "Planet Fitness", "gym","NullValueEntered"))
+  corpus <- tm_map(corpus, content_transformer(tolower))
+  return(corpus)
+}
+
+#tokenizer <- function(x) 
+#  NGramTokenizer(x, Weka_control(min = 3, max = 3))
+
+text_corpus <- clean_corpus(text_corpus)
+
+text_dtm <- DocumentTermMatrix(text_clean, control = list(weighting = weightTfIdf))
+
+#inspect(text_tdm[1:4, 30:35])
+
+#creat word cloud for churn member
+churn_index <- which(new_data$Survival == 1)
+churn_index[1:3]
+
+retain_index <-which(new_data$Survival == 0)
+churn_index[1:3]
+
+wordcloud(text_corpus[churn_index], min.freq=80)
+
+wordcloud(text_corpus[retain_index], min.freq=80)
+
+#prepare the data
+set.seed(1234)
+
+n <- nrow(new_data)
+
+n_train <- 0.8*n
+
+train_indices <- sample(1:n, n_train)
+
+#subset the data frame to training indices only
+new_data_train <- new_data[train_indices, ]
+
+# exclude the training indices to create the test set
+new_data_test <- new_data[-train_indices, ]
+
+text_corpus_train <-text_corpus[train_indices]
+text_corpus_test <-text_corpus[-train_indices]
+
+text_dtm_train <- text_dtm[train_indices,]
+text_dtm_test <- text_dtm[-train_indices,]
+
+#separate training data to churn and retain
+churn <- subset(new_data_train,Survival == 1)
+retain <- subset(new_data_train, Survival == 0)
+
+#build naive bayes model
+
+#identify high frequeny words 5+
+five_times_words <- findFreqTerms(text_dtm_train,5)
+length(five_times_words)
+
+ten_times_words[1:5]
+
+#Create document-term matrices using frequent words
+text_train <- DocumentTermMatrix(text_corpus_train, control=list(dictionary = five_times_words))
+
+text_test <- DocumentTermMatrix(text_corpus_test, control=list(dictionary = five_times_words))
+
+#Convert count information to "Yes", "No"
+
+convert_count <- function(x) {
+  y <- ifelse(x > 0, 1,0)
+  y <- factor(y, levels=c(0,1), labels=c("No", "Yes"))
+  y
+}
+
+text_train <- apply(text_train, 2, convert_count)
+text_test <- apply(text_test, 2, convert_count)
+
+#Create a Naive Bayes classifier object
+text_classifier <- naiveBayes(text_train, factor(new_data_train$Survival))
+
+class(text_classifier)
+
+text_test_pred <- predict(text_classifier, newdata=new_data_test)
+
+confusionMatrix(new_data_test$Survival, text_test_pred)
+
+
+```
+
