@@ -260,6 +260,5 @@ text_test_pred <- predict(text_classifier, newdata=new_data_test)
 
 confusionMatrix(new_data_test$Survival, text_test_pred)
 
-text_classifier
 ```
 
