@@ -1,5 +1,5 @@
 ---
-title: "Project 1"
+title: "Project text mining"
 output: html_document
 ---
 
@@ -9,7 +9,7 @@ knitr::opts_chunk$set(echo = TRUE)
 
 
 
-```{r}
+```{r, warning=FALSE}
 #load the package
 library(qdap)
 library(tidyr)
@@ -21,25 +21,30 @@ library(RWeka)
 library(wordcloud)
 library(e1071)
 library(caret)
+library(magrittr)
+library(gtools)
 ```
 
 ## R Markdown
 
-```{r, echo=FALSE}
-raw_data <- read.csv("CX Wave 1 Merge file 2.22.18.csv",stringsAsFactors = FALSE)
+```{r, echo=FALSE,warning=FALSE}
+raw_data <- read.csv("CX Wave 1 Merge file 2.22.18.csv",stringsAsFactors = FALSE,na.strings=c("",NA, " "))
+
 head(raw_data, 5)
 
 target_data <- raw_data[,c(420,421)]
+
 text_data <- raw_data[,c(198:210,235:238,246,254,262,362:363)]
 
+text_data[which(is.na(text_data)),]<- " "
+
 new_data <- cbind(target_data,text_data)
-new_data$all_text <- apply(raw_data[,c(198:210,235:238,246,254,262,362:363)], 1, paste, collapse = "")
+
+new_data$all_text <- apply(raw_data[,c(198:210,235:238,246,254,262,362:363)], 1, paste, collapse = ",")
+
 
 #just keep all open-ends and target variables
 new_data <- new_data[,-c(3:24)]
-
-new_data[is.na(new_data)] <- "NullValueEntered"
-str(new_data)
 
 #make a source vector
 text <- VectorSource(new_data$all_text)
@@ -51,17 +56,28 @@ clean_corpus <- function(corpus){
   corpus <- tm_map(corpus, removePunctuation)
   corpus <- tm_map(corpus, removeNumbers)
   corpus <- tm_map(corpus, stripWhitespace)
-  corpus <- tm_map(corpus, removeWords, c(stopwords("en"), "the", "and","i", "Planet","Fitness", "gym","NullValueEntered"))
+  corpus <- tm_map(corpus, removeWords, c(stopwords("en"), "the", "and","i", "Planet","Fitness","NA","gym"))
   corpus <- tm_map(corpus, content_transformer(tolower))
   return(corpus)
 }
 
-#tokenizer <- function(x) 
-#  NGramTokenizer(x, Weka_control(min = 3, max = 3))
+tokenizer <- function(x) 
+  NGramTokenizer(x, Weka_control(min = 3, max = 3))
 
 text_corpus <- clean_corpus(text_corpus)
 
-text_dtm <- DocumentTermMatrix(text_clean, control = list(weighting = weightTfIdf))
+str(text_corpus)
+
+text_dtm <- DocumentTermMatrix(text_corpus, control = list(tokenize = tokenizer))
+
+str(text_dtm)
+
+
+text_dtm_m <- as.matrix(text_dtm)
+
+text_freq <- rowSums(text_dtm_m)
+
+wordcloud(names(text_freq), text_freq, max.words = 25, color = "blue" )
 
 #inspect(text_tdm[1:4, 30:35])
 
@@ -120,7 +136,6 @@ text_train <- DocumentTermMatrix(text_corpus_train, control=list(dictionary = fi
 text_test <- DocumentTermMatrix(text_corpus_test, control=list(dictionary = five_times_words))
 
 #Convert count information to "Yes", "No"
-
 convert_count <- function(x) {
   y <- ifelse(x > 0, 1,0)
   y <- factor(y, levels=c(0,1), labels=c("No", "Yes"))
@@ -138,6 +153,16 @@ class(text_classifier)
 text_test_pred <- predict(text_classifier, newdata=new_data_test)
 
 confusionMatrix(new_data_test$Survival, text_test_pred)
+
+
+```
+```{r}
+#sentiment analysis
+
+#compute the polarity score for each obs
+text_m <- as.matrix(text_dtm)
+text_df <- as.data.frame(text_m)
+polarity_score <- polarity(text_df)
 
 
 ```
