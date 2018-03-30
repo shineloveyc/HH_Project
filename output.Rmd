@@ -8,7 +8,7 @@ knitr::opts_chunk$set(echo = TRUE)
 ```
 
 
-
+## load library
 ```{r, warning=FALSE}
 #load the package
 library(qdap)
@@ -23,117 +23,222 @@ library(e1071)
 library(caret)
 library(magrittr)
 library(gtools)
+library(ggthemes)
 ```
 
 ## R Markdown
 
 ```{r, echo=FALSE,warning=FALSE}
-raw_data <- read.csv("CX Wave 1 Merge file 2.22.18.csv",stringsAsFactors = FALSE,na.strings=c("",NA, " "))
+#get PF dataset
+raw_data <- read.csv("CX Wave 1 Merge file 2.22.18.csv",stringsAsFactors = FALSE)
 
 head(raw_data, 5)
 
+#define dependent variables
 target_data <- raw_data[,c(420,421)]
+
+#define open-ended question
 
 text_data <- raw_data[,c(198:210,235:238,246,254,262,362:363)]
 
-text_data[which(is.na(text_data)),]<- " "
-
+#combine two datasest
 new_data <- cbind(target_data,text_data)
 
-new_data$all_text <- apply(raw_data[,c(198:210,235:238,246,254,262,362:363)], 1, paste, collapse = ",")
+#merge all text to one column
+new_data$all_text <- apply(raw_data[,c(198:210,235:238,246,254,262,362:363)], 1, paste, collapse = " ")
 
 
 #just keep all open-ends and target variables
 new_data <- new_data[,-c(3:24)]
 
+#convert Survival to factor
+new_data$Survival<- factor(new_data$Survival, levels = c(0, 1))
+```
+
+
+## sentiment analysis
+```{r, warning=FALSE}
+#sentiment analysis
+
 #make a source vector
-text <- VectorSource(new_data$all_text)
+open_end <- VectorSource(new_data$all_text)
 
-text_corpus <- VCorpus(text)
+#covert to corpus
+open_end_corpus <- VCorpus(open_end)
 
+#create polarity object of all text
+open_end_pol <- polarity(new_data$all_text)
+
+summary(open_end_pol$all$polarity)
+
+#add polarity column
+new_data_with_pol <- new_data %>% mutate(polarity = scale(open_end_pol$all$polarity))
+
+#check missing value
+sapply(new_data_with_pol, function(x) sum(is.na(x)))
+
+#process the missing data
+t.test(new_data_with_pol$polarity~new_data_with_pol$Survival)
+
+#impute missing data
+new_data_with_pol$polarity[is.nan(new_data_with_pol$polarity)] <- mean(new_data_with_pol$polarity, na.rm = TRUE)
+
+pos_comments <- subset(new_data_with_pol$all_text, new_data_with_pol$polarity > 0)
+
+# Subset negative comments
+neg_comments <- subset(new_data_with_pol$all_text, new_data_with_pol$polarity < 0)
+
+#paste and collapse the positive comments
+pos_terms <- paste(pos_comments, collapse = " ")
+
+# Paste and collapse the negative comments
+neg_terms <- paste(neg_comments, collapse = " ")
+
+# Concatenate the terms
+all_terms <- c(pos_terms, neg_terms)
+
+# Pipe a VectorSource Corpus
+all_corpus <- all_terms %>% 
+  VectorSource() %>% 
+  VCorpus()
+
+tokenizer <- function(x) 
+  NGramTokenizer(x, Weka_control(min = 2, max = 2))
+
+# Simple TFIDF TDM
+all_tdm <- TermDocumentMatrix(
+  all_corpus, 
+  control = list(
+    weighting = weightTfIdf, 
+    removePunctuation = TRUE, 
+    stopwords = stopwords(kind = "en")
+  )
+)
+
+# Examine the TDM
+all_tdm
+
+# Matrix
+all_tdm_m <- as.matrix(all_tdm)
+
+# Column names
+colnames(all_tdm_m) <- c("positive", "negative")
+
+# Top pos words
+order_by_pos <- order(all_tdm_m[, 1], decreasing = TRUE)
+
+# Review top 10 pos words
+all_tdm_m[order_by_pos, ] %>% head(n=20)
+
+# Top neg words
+order_by_neg <- order(all_tdm_m[, 2], decreasing = TRUE)
+
+# Review top 10 neg words
+all_tdm_m[order_by_neg, ] %>% head(n =20)
+
+# Comparison cloud
+comparison.cloud(
+  all_tdm_m, 
+  max.words = 50,
+  colors = c("darkgreen","darkred")
+)
+
+```
+
+## Textmining for churn and retain members
+```{r, warning=FALSE}
 clean_corpus <- function(corpus){
   corpus <- tm_map(corpus, content_transformer(replace_abbreviation))
   corpus <- tm_map(corpus, removePunctuation)
   corpus <- tm_map(corpus, removeNumbers)
   corpus <- tm_map(corpus, stripWhitespace)
-  corpus <- tm_map(corpus, removeWords, c(stopwords("en"), "the", "and","i", "Planet","Fitness","NA","gym"))
+  corpus <- tm_map(corpus, removeWords, c(stopwords("en"), "Planet","Fitness","gym"))
   corpus <- tm_map(corpus, content_transformer(tolower))
   return(corpus)
 }
 
-tokenizer <- function(x) 
-  NGramTokenizer(x, Weka_control(min = 3, max = 3))
+#clean corpus
+text_corpus <- clean_corpus(open_end_corpus)
 
-text_corpus <- clean_corpus(text_corpus)
+#create a clean TDM
 
-str(text_corpus)
-
-text_dtm <- DocumentTermMatrix(text_corpus, control = list(tokenize = tokenizer))
-
-str(text_dtm)
-
-
-text_dtm_m <- as.matrix(text_dtm)
-
-text_freq <- rowSums(text_dtm_m)
-
-wordcloud(names(text_freq), text_freq, max.words = 25, color = "blue" )
-
-#inspect(text_tdm[1:4, 30:35])
-
-#remove words with the less frequent terms such that the sparsity is less than 0.95
-text_dtm <- removeSparseTerms(text_dtm, 0.99)
+text_dtm <- DocumentTermMatrix(text_corpus)
 
 #creat word cloud for churn member
 churn_index <- which(new_data$Survival == 1)
-churn_index[1:3]
+
 
 retain_index <-which(new_data$Survival == 0)
-churn_index[1:3]
+
 
 #create word cloud for churn member
-wordcloud(text_corpus[churn_index], min.freq=80)
+wordcloud(text_corpus[churn_index], min.freq=80,max.words = 50)
 
 #create word clud for retain member
-wordcloud(text_corpus[retain_index], min.freq=80)
+wordcloud(text_corpus[retain_index], min.freq=80,max.words = 50)
+```
 
+#build prediction model
+```{r}
 #prepare the data
 set.seed(1234)
 
-n <- nrow(new_data)
+n <- nrow(new_data_with_pol)
 
 n_train <- 0.8*n
 
 train_indices <- sample(1:n, n_train)
 
 #subset the data frame to training indices only
-new_data_train <- new_data[train_indices, ]
+new_data_train <- new_data_with_pol[train_indices, ]
 
 # exclude the training indices to create the test set
-new_data_test <- new_data[-train_indices, ]
+new_data_test <- new_data_with_pol[-train_indices, ]
 
 text_corpus_train <-text_corpus[train_indices]
 text_corpus_test <-text_corpus[-train_indices]
 
 text_dtm_train <- text_dtm[train_indices,]
 text_dtm_test <- text_dtm[-train_indices,]
+```
 
+
+## build logit model based on polarity score
+```{r}
+table(new_data_with_pol$Survival)
+
+new_data_train_subset <- new_data_train[c(1,2,4)]
+
+logit_model <- glm (Survival ~ ., data = new_data_train_subset, family = binomial(link="logit"))
+summary(logit_model)
+
+new_data_test_subset <- new_data_test[c(1,2,4)]
+
+predict <- predict(logit_model,new_data_test_subset, type = "response")
+
+pred_num <- ifelse(predict > 0.5, 1, 0)
+pred <- factor(pred_num, levels=c(0, 1))
+act <- new_data_test$Survival
+
+mean(pred == act) 
+
+```
+
+## build naive bayes model based on word frequency
+```{r}
 #separate training data to churn and retain
 churn <- subset(new_data_train,Survival == 1)
 retain <- subset(new_data_train, Survival == 0)
-
-#build naive bayes model
 
 #identify high frequeny words 5+
 five_times_words <- findFreqTerms(text_dtm_train,5)
 length(five_times_words)
 
-ten_times_words[1:5]
-
 #Create document-term matrices using frequent words
 text_train <- DocumentTermMatrix(text_corpus_train, control=list(dictionary = five_times_words))
 
 text_test <- DocumentTermMatrix(text_corpus_test, control=list(dictionary = five_times_words))
+
 
 #Convert count information to "Yes", "No"
 convert_count <- function(x) {
@@ -145,6 +250,7 @@ convert_count <- function(x) {
 text_train <- apply(text_train, 2, convert_count)
 text_test <- apply(text_test, 2, convert_count)
 
+
 #Create a Naive Bayes classifier object
 text_classifier <- naiveBayes(text_train, factor(new_data_train$Survival))
 
@@ -154,16 +260,6 @@ text_test_pred <- predict(text_classifier, newdata=new_data_test)
 
 confusionMatrix(new_data_test$Survival, text_test_pred)
 
-
-```
-```{r}
-#sentiment analysis
-
-#compute the polarity score for each obs
-text_m <- as.matrix(text_dtm)
-text_df <- as.data.frame(text_m)
-polarity_score <- polarity(text_df)
-
-
+text_classifier
 ```
 
