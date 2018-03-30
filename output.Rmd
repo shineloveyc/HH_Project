@@ -32,8 +32,6 @@ library(ggthemes)
 #get PF dataset
 raw_data <- read.csv("CX Wave 1 Merge file 2.22.18.csv",stringsAsFactors = FALSE)
 
-head(raw_data, 5)
-
 #define dependent variables
 target_data <- raw_data[,c(420,421)]
 
@@ -47,7 +45,6 @@ new_data <- cbind(target_data,text_data)
 #merge all text to one column
 new_data$all_text <- apply(raw_data[,c(198:210,235:238,246,254,262,362:363)], 1, paste, collapse = " ")
 
-
 #just keep all open-ends and target variables
 new_data <- new_data[,-c(3:24)]
 
@@ -57,7 +54,7 @@ new_data$Survival<- factor(new_data$Survival, levels = c(0, 1))
 
 
 ## sentiment analysis
-```{r, warning=FALSE}
+```{r, echo=FALSE, warning=FALSE}
 #sentiment analysis
 
 #make a source vector
@@ -146,7 +143,7 @@ comparison.cloud(
 ```
 
 ## Textmining for churn and retain members
-```{r, warning=FALSE}
+```{r, echo=FALSE,warning=FALSE}
 clean_corpus <- function(corpus){
   corpus <- tm_map(corpus, content_transformer(replace_abbreviation))
   corpus <- tm_map(corpus, removePunctuation)
@@ -225,7 +222,7 @@ mean(pred == act)
 ```
 
 ## build naive bayes model based on word frequency
-```{r}
+```{r, warning=FALSE}
 #separate training data to churn and retain
 churn <- subset(new_data_train,Survival == 1)
 retain <- subset(new_data_train, Survival == 0)
